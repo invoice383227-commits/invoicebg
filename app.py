@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -108,6 +109,12 @@ def confirm_file_item(item_idx, item, fetcher):
     item = st.session_state.invoice_items[item_idx]
     new_filename = item.proposed_filename or item.original_filename
     safe_name, dest_path = file_invoice(item.local_path, PROCESSED_DIR, new_filename)
+
+    out_dir = st.session_state.get("output_dir", "")
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+        shutil.copy2(dest_path, os.path.join(out_dir, safe_name))
+
     log_activity(
         timestamp=item.date,
         action='filed',
@@ -130,7 +137,8 @@ def confirm_file_item(item_idx, item, fetcher):
             pass
     item.filed = True
     item.dest_path = dest_path
-    st.success(f"Filed as {safe_name}")
+    extra = f" and saved to {out_dir}" if out_dir else ""
+    st.success(f"Filed as {safe_name}{extra}")
     st.rerun()
 
 
@@ -378,6 +386,18 @@ def sidebar_config():
             fetcher = _imap_fetcher_from_config(imap_host, imap_user, imap_pass)
             if not fetcher:
                 st.info("Enter IMAP credentials above or add them to .streamlit/secrets.toml")
+
+        st.divider()
+        st.subheader("Auto-save folder")
+        out_dir = st.text_input(
+            "Copy filed PDFs to",
+            value=st.session_state.get("output_dir", ""),
+            placeholder=r"C:\Users\...\invoices",
+            help="When set, filed invoices are also copied here.",
+        )
+        st.session_state.output_dir = out_dir
+        if out_dir and not os.path.isdir(out_dir):
+            st.caption("Folder does not exist yet — it will be created on first file.")
 
         st.divider()
         st.caption("Invoice Intake v1.0")
