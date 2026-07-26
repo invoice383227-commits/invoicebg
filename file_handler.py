@@ -36,7 +36,10 @@ def get_unique_filename(dest_dir: str, filename: str) -> str:
 def file_invoice(src_path: str, dest_dir: str, new_filename: str):
     safe_name = get_unique_filename(dest_dir, new_filename)
     dest_path = os.path.join(dest_dir, safe_name)
-    shutil.move(src_path, dest_path)
+    if os.path.exists(src_path):
+        shutil.move(src_path, dest_path)
+    elif not os.path.exists(dest_path):
+        dest_path = src_path
     return safe_name, dest_path
 
 
