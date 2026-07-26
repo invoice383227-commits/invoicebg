@@ -104,10 +104,19 @@ def fetch_and_process(fetcher, use_demo):
             st.error(f"Failed to check inbox: {e}")
 
 
+def _resolve_src(item):
+    src = item.local_path
+    if not os.path.exists(src):
+        fallback = os.path.join(os.path.dirname(os.path.abspath(__file__)), item.original_filename)
+        if os.path.exists(fallback):
+            src = fallback
+    return src
+
+
 def confirm_file_item(item_idx, item, use_demo, fetcher):
     item = st.session_state.invoice_items[item_idx]
     new_filename = item.proposed_filename or item.original_filename
-    safe_name, dest_path = file_invoice(item.local_path, PROCESSED_DIR, new_filename)
+    safe_name, dest_path = file_invoice(_resolve_src(item), PROCESSED_DIR, new_filename)
     log_activity(
         timestamp=item.date,
         action='filed',
@@ -137,7 +146,7 @@ def confirm_file_item(item_idx, item, use_demo, fetcher):
 def send_to_review(item_idx, item, use_demo, fetcher):
     item = st.session_state.invoice_items[item_idx]
     dest = SCANNED_DIR if not item.is_digital else UNRESOLVED_DIR
-    safe_name, dest_path = file_invoice(item.local_path, dest, item.original_filename)
+    safe_name, dest_path = file_invoice(_resolve_src(item), dest, item.original_filename)
     log_activity(
         timestamp=item.date,
         action='sent_to_manual_review',
