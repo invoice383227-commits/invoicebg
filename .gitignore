@@ -5,3 +5,4 @@ invoice_intake/needs_manual_review/
 test_preview.png
 __pycache__/
 *.pyc
+.streamlit/secrets.toml

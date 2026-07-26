@@ -57,3 +57,12 @@ def get_manual_review_files():
                 if f.lower().endswith('.pdf'):
                     lst.append(os.path.join(d, f))
     return scanned_files, unresolved_files
+
+
+def get_processed_files():
+    files = []
+    if os.path.exists(PROCESSED_DIR):
+        for f in sorted(os.listdir(PROCESSED_DIR)):
+            if f.lower().endswith('.pdf'):
+                files.append(os.path.join(PROCESSED_DIR, f))
+    return files

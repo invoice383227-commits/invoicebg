@@ -14,7 +14,7 @@ from extractor import resolve_vendor_name, extract_invoice_number
 from file_handler import (
     create_folder_structure, file_invoice, log_activity,
     INCOMING_DIR, PROCESSED_DIR, SCANNED_DIR, UNRESOLVED_DIR,
-    ACTIVITY_LOG_PATH, get_manual_review_files,
+    ACTIVITY_LOG_PATH, get_manual_review_files, get_processed_files,
 )
 from config_manager import load_vendor_mapping, add_vendor_mapping
 
@@ -36,6 +36,7 @@ class InvoiceItem:
     sent_to_review: bool = False
     editable_vendor: str = ''
     editable_inv: str = ''
+    dest_path: str = ''
 
 
 def render_pdf_preview(pdf_path):
@@ -127,7 +128,8 @@ def confirm_file_item(item_idx, item, use_demo, fetcher):
             ))
         except Exception:
             pass
-    st.session_state.invoice_items[item_idx].filed = True
+    item.filed = True
+    item.dest_path = dest_path
     st.success(f"Filed as {safe_name}")
     st.rerun()
 
@@ -159,6 +161,33 @@ def send_to_review(item_idx, item, use_demo, fetcher):
     st.session_state.invoice_items[item_idx].sent_to_review = True
     st.success(f"Moved to manual review as {safe_name}")
     st.rerun()
+
+
+def filed_items_section():
+    filed = [i for i in st.session_state.invoice_items if i.filed and i.dest_path]
+    if not filed:
+        return
+    st.divider()
+    st.subheader(f"Filed — ready to download ({len(filed)})")
+    for idx, item in enumerate(filed):
+        with st.container(border=True):
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                st.markdown(f"**{item.proposed_filename or item.original_filename}**")
+                st.caption(f"{item.sender} · {item.date}")
+            with c2:
+                try:
+                    with open(item.dest_path, 'rb') as f:
+                        file_bytes = f.read()
+                    st.download_button(
+                        label="Download",
+                        data=file_bytes,
+                        file_name=item.proposed_filename or item.original_filename,
+                        mime="application/pdf",
+                        key=f"dl_filed_{idx}_{item.email_uid}",
+                    )
+                except FileNotFoundError:
+                    st.caption("File unavailable")
 
 
 def tab_process_invoices(fetcher, use_demo):
@@ -224,6 +253,8 @@ def tab_process_invoices(fetcher, use_demo):
                             confirm_file_item(idx, item, use_demo, fetcher)
                     if st.button("Send to Manual Review", key=f"review_{idx}", width='stretch'):
                         send_to_review(idx, item, use_demo, fetcher)
+        filed_items_section()
+
     elif st.session_state.get('fetched'):
         st.info("No invoices to process. Click **Check Inbox** to search for new invoices.")
 
@@ -258,6 +289,33 @@ def tab_manual_review():
 
     if not scanned_files and not unresolved_files:
         st.info("No documents in manual review.")
+
+
+def tab_processed_files():
+    st.header("Processed Files")
+    files = get_processed_files()
+    if not files:
+        st.info("No processed files yet. Use the **Process Invoices** tab to file invoices.")
+        return
+
+    for f in files:
+        with st.container(border=True):
+            c1, c2, c3 = st.columns([3, 1, 1])
+            with c1:
+                st.markdown(f"**{os.path.basename(f)}**")
+            with c2:
+                img = render_pdf_preview(f)
+                if img:
+                    st.image(img, width=150)
+            with c3:
+                with open(f, 'rb') as fh:
+                    st.download_button(
+                        label="Download",
+                        data=fh.read(),
+                        file_name=os.path.basename(f),
+                        mime="application/pdf",
+                        key=f"dl_processed_{os.path.basename(f)}",
+                    )
 
 
 def tab_activity_log():
@@ -295,6 +353,12 @@ def tab_vendor_mapping():
                 st.rerun()
 
 
+def _imap_fetcher_from_config(host, user, password):
+    if host and user and password:
+        return IMAPMailboxFetcher(host.strip(), user.strip(), password.strip())
+    return None
+
+
 def sidebar_config():
     with st.sidebar:
         st.header("Configuration")
@@ -311,14 +375,21 @@ def sidebar_config():
             else:
                 st.error("Folder not found.")
         else:
-            st.subheader("IMAP Settings")
-            imap_host = st.text_input("Host", value="imap.gmail.com")
-            imap_user = st.text_input("Username", placeholder="you@gmail.com")
-            imap_pass = st.text_input("App Password", type="password")
-            if imap_host and imap_user and imap_pass:
-                fetcher = IMAPMailboxFetcher(imap_host.strip(), imap_user.strip(), imap_pass.strip())
-            else:
-                st.info("Enter IMAP credentials above.")
+            try:
+                imap_host = st.secrets["email"]["imap_host"]
+                imap_user = st.secrets["email"]["smtp_user"]
+                imap_pass = st.secrets["email"]["smtp_pass"]
+                fetcher = _imap_fetcher_from_config(imap_host, imap_user, imap_pass)
+                if fetcher:
+                    st.success(f"Connected as {imap_user}")
+            except (KeyError, FileNotFoundError):
+                st.subheader("IMAP Settings")
+                imap_host = st.text_input("Host", value="imap.gmail.com")
+                imap_user = st.text_input("Username", placeholder="you@gmail.com")
+                imap_pass = st.text_input("App Password", type="password")
+                fetcher = _imap_fetcher_from_config(imap_host, imap_user, imap_pass)
+                if not fetcher:
+                    st.info("Enter IMAP credentials above or add them to .streamlit/secrets.toml")
 
         st.divider()
         st.caption("Invoice Intake v1.0")
@@ -339,9 +410,10 @@ def main():
 
     use_demo, fetcher = sidebar_config()
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "Process Invoices",
         "Needs Manual Review",
+        "Processed Files",
         "Activity Log",
         "Vendor Mapping",
     ])
@@ -351,8 +423,10 @@ def main():
     with tab2:
         tab_manual_review()
     with tab3:
-        tab_activity_log()
+        tab_processed_files()
     with tab4:
+        tab_activity_log()
+    with tab5:
         tab_vendor_mapping()
 
 
