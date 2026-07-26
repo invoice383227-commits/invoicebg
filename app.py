@@ -375,17 +375,17 @@ def sidebar_config():
             else:
                 st.error("Folder not found.")
         else:
-            try:
-                imap_host = st.secrets["email"]["imap_host"]
-                imap_user = st.secrets["email"]["smtp_user"]
-                imap_pass = st.secrets["email"]["smtp_pass"]
-                fetcher = _imap_fetcher_from_config(imap_host, imap_user, imap_pass)
-                if fetcher:
-                    st.success(f"Connected as {imap_user}")
-            except (KeyError, FileNotFoundError):
+            sec = st.secrets
+            imap_host = sec.get("imap_host") or sec.get("email", {}).get("imap_host")
+            imap_user = sec.get("imap_user") or sec.get("email", {}).get("imap_user") or sec.get("email", {}).get("smtp_user")
+            imap_pass = sec.get("imap_pass") or sec.get("email", {}).get("imap_pass") or sec.get("email", {}).get("smtp_pass")
+            fetcher = _imap_fetcher_from_config(imap_host, imap_user, imap_pass)
+            if fetcher:
+                st.success(f"Connected as {imap_user}")
+            else:
                 st.subheader("IMAP Settings")
-                imap_host = st.text_input("Host", value="imap.gmail.com")
-                imap_user = st.text_input("Username", placeholder="you@gmail.com")
+                imap_host = st.text_input("Host", value=imap_host or "imap.gmail.com")
+                imap_user = st.text_input("Username", value=imap_user or "", placeholder="you@gmail.com")
                 imap_pass = st.text_input("App Password", type="password")
                 fetcher = _imap_fetcher_from_config(imap_host, imap_user, imap_pass)
                 if not fetcher:
