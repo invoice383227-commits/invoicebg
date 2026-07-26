@@ -8,7 +8,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from mailbox import IMAPMailboxFetcher, LocalFolderFetcher, EmailAttachment
+from mailbox import IMAPMailboxFetcher, EmailAttachment
 from classifier import classify_pdf
 from extractor import resolve_vendor_name, extract_invoice_number
 from file_handler import (
@@ -53,7 +53,7 @@ def render_pdf_preview(pdf_path):
         return None
 
 
-def fetch_and_process(fetcher, use_demo):
+def fetch_and_process(fetcher):
     with st.spinner("Checking for new invoices..."):
         try:
             emails = fetcher.fetch_unread_invoice_emails()
@@ -104,19 +104,10 @@ def fetch_and_process(fetcher, use_demo):
             st.error(f"Failed to check inbox: {e}")
 
 
-def _resolve_src(item):
-    src = item.local_path
-    if not os.path.exists(src):
-        fallback = os.path.join(os.path.dirname(os.path.abspath(__file__)), item.original_filename)
-        if os.path.exists(fallback):
-            src = fallback
-    return src
-
-
-def confirm_file_item(item_idx, item, use_demo, fetcher):
+def confirm_file_item(item_idx, item, fetcher):
     item = st.session_state.invoice_items[item_idx]
     new_filename = item.proposed_filename or item.original_filename
-    safe_name, dest_path = file_invoice(_resolve_src(item), PROCESSED_DIR, new_filename)
+    safe_name, dest_path = file_invoice(item.local_path, PROCESSED_DIR, new_filename)
     log_activity(
         timestamp=item.date,
         action='filed',
@@ -126,7 +117,7 @@ def confirm_file_item(item_idx, item, use_demo, fetcher):
         invoice_number=item.editable_inv or item.invoice_number,
         status='digital',
     )
-    if not use_demo and fetcher:
+    if fetcher:
         try:
             fetcher.mark_as_read(EmailAttachment(
                 sender=item.sender,
@@ -143,10 +134,10 @@ def confirm_file_item(item_idx, item, use_demo, fetcher):
     st.rerun()
 
 
-def send_to_review(item_idx, item, use_demo, fetcher):
+def send_to_review(item_idx, item, fetcher):
     item = st.session_state.invoice_items[item_idx]
     dest = SCANNED_DIR if not item.is_digital else UNRESOLVED_DIR
-    safe_name, dest_path = file_invoice(_resolve_src(item), dest, item.original_filename)
+    safe_name, dest_path = file_invoice(item.local_path, dest, item.original_filename)
     log_activity(
         timestamp=item.date,
         action='sent_to_manual_review',
@@ -156,7 +147,7 @@ def send_to_review(item_idx, item, use_demo, fetcher):
         invoice_number=item.invoice_number,
         status='scanned' if not item.is_digital else 'unresolved',
     )
-    if not use_demo and fetcher:
+    if fetcher:
         try:
             fetcher.mark_as_read(EmailAttachment(
                 sender=item.sender,
@@ -199,16 +190,16 @@ def filed_items_section():
                     st.caption("File unavailable")
 
 
-def tab_process_invoices(fetcher, use_demo):
+def tab_process_invoices(fetcher):
     col1, col2 = st.columns([3, 1])
     with col1:
         st.header("Process Invoices")
     with col2:
         if st.button("Check Inbox for New Invoices", width='stretch', type="primary"):
             if fetcher is None:
-                st.error("Configure mailbox access in the sidebar, or enable Demo mode.")
+                st.error("Configure mailbox access in the sidebar.")
             else:
-                fetch_and_process(fetcher, use_demo)
+                fetch_and_process(fetcher)
 
     if st.session_state.invoice_items:
         pending = [i for i in st.session_state.invoice_items if not i.filed and not i.sent_to_review]
@@ -259,9 +250,9 @@ def tab_process_invoices(fetcher, use_demo):
                 with cols[3]:
                     if item.is_digital:
                         if st.button("Confirm & File", key=f"file_{idx}", width='stretch'):
-                            confirm_file_item(idx, item, use_demo, fetcher)
+                            confirm_file_item(idx, item, fetcher)
                     if st.button("Send to Manual Review", key=f"review_{idx}", width='stretch'):
-                        send_to_review(idx, item, use_demo, fetcher)
+                        send_to_review(idx, item, fetcher)
         filed_items_section()
 
     elif st.session_state.get('fetched'):
@@ -372,38 +363,26 @@ def sidebar_config():
     with st.sidebar:
         st.header("Configuration")
 
-        use_demo = st.checkbox("Demo Mode (local PDFs)", value=True,
-                               help="Use PDFs from a local folder instead of connecting to email.")
-
-        fetcher = None
-        if use_demo:
-            demo_path = st.text_input("Demo PDFs folder",
-                                      value=os.path.dirname(os.path.abspath(__file__)))
-            if os.path.isdir(demo_path):
-                fetcher = LocalFolderFetcher(demo_path)
-            else:
-                st.error("Folder not found.")
+        sec = st.secrets
+        imap_host = sec.get("imap_host") or sec.get("email", {}).get("imap_host")
+        imap_user = sec.get("imap_user") or sec.get("email", {}).get("imap_user") or sec.get("email", {}).get("smtp_user")
+        imap_pass = sec.get("imap_pass") or sec.get("email", {}).get("imap_pass") or sec.get("email", {}).get("smtp_pass")
+        fetcher = _imap_fetcher_from_config(imap_host, imap_user, imap_pass)
+        if fetcher:
+            st.success(f"Connected as {imap_user}")
         else:
-            sec = st.secrets
-            imap_host = sec.get("imap_host") or sec.get("email", {}).get("imap_host")
-            imap_user = sec.get("imap_user") or sec.get("email", {}).get("imap_user") or sec.get("email", {}).get("smtp_user")
-            imap_pass = sec.get("imap_pass") or sec.get("email", {}).get("imap_pass") or sec.get("email", {}).get("smtp_pass")
+            st.subheader("IMAP Settings")
+            imap_host = st.text_input("Host", value=imap_host or "imap.gmail.com")
+            imap_user = st.text_input("Username", value=imap_user or "", placeholder="you@gmail.com")
+            imap_pass = st.text_input("App Password", type="password")
             fetcher = _imap_fetcher_from_config(imap_host, imap_user, imap_pass)
-            if fetcher:
-                st.success(f"Connected as {imap_user}")
-            else:
-                st.subheader("IMAP Settings")
-                imap_host = st.text_input("Host", value=imap_host or "imap.gmail.com")
-                imap_user = st.text_input("Username", value=imap_user or "", placeholder="you@gmail.com")
-                imap_pass = st.text_input("App Password", type="password")
-                fetcher = _imap_fetcher_from_config(imap_host, imap_user, imap_pass)
-                if not fetcher:
-                    st.info("Enter IMAP credentials above or add them to .streamlit/secrets.toml")
+            if not fetcher:
+                st.info("Enter IMAP credentials above or add them to .streamlit/secrets.toml")
 
         st.divider()
         st.caption("Invoice Intake v1.0")
 
-        return use_demo, fetcher
+        return fetcher
 
 
 def main():
@@ -417,7 +396,7 @@ def main():
 
     create_folder_structure()
 
-    use_demo, fetcher = sidebar_config()
+    fetcher = sidebar_config()
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "Process Invoices",
@@ -428,7 +407,7 @@ def main():
     ])
 
     with tab1:
-        tab_process_invoices(fetcher, use_demo)
+        tab_process_invoices(fetcher)
     with tab2:
         tab_manual_review()
     with tab3:

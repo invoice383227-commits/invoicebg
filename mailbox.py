@@ -1,8 +1,6 @@
 import imaplib
 import email
-from email.header import decode_header
 import os
-import shutil
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -106,61 +104,3 @@ class IMAPMailboxFetcher:
         mail.store(email_attachment.email_uid.encode(), '+FLAGS', '\\Seen')
         mail.logout()
 
-
-class LocalFolderFetcher:
-    def __init__(self, folder_path: str):
-        self.folder_path = folder_path
-
-    def fetch_unread_invoice_emails(self) -> List[EmailAttachment]:
-        results: List[EmailAttachment] = []
-        demo_map = {
-            'AcmeSupply_INV-10234.pdf': (
-                'billing@acmesupply.com',
-                'Invoice from Acme Supply Co.',
-                'Thu, 18 Jun 2026 10:00:00 -0600',
-            ),
-            'BoltFasteners_BF-2024-0098A.pdf': (
-                'invoices@boltfasteners.com',
-                'Invoice from Bolt & Fasteners Ltd.',
-                'Sat, 20 Jun 2026 11:30:00 -0400',
-            ),
-            'PrecisionMachining_7741.pdf': (
-                'accounts@precisionmachiningco.com',
-                'Invoice from Precision Machining Co.',
-                'Sun, 21 Jun 2026 09:15:00 -0400',
-            ),
-            'SummitElectrical_SE-88213.pdf': (
-                'ar@summitelectrical.com',
-                'Invoice from Summit Electrical Supply',
-                'Tue, 23 Jun 2026 14:00:00 -0600',
-            ),
-            'GlobalTools_scanned_00417.pdf': (
-                'ap@globaltools.com',
-                'Invoice from Global Tools',
-                'Thu, 25 Jun 2026 08:45:00 -0500',
-            ),
-        }
-        for fname in os.listdir(self.folder_path):
-            if fname.lower().endswith('.pdf'):
-                info = demo_map.get(fname, ('unknown@unknown.com', f'Invoice: {fname}', 'Unknown date'))
-                results.append(EmailAttachment(
-                    sender=info[0],
-                    subject=info[1],
-                    date=info[2],
-                    email_uid=fname,
-                    attachment_filename=fname,
-                ))
-        return results
-
-    def download_attachment(self, email_attachment: EmailAttachment, dest_dir: str) -> str:
-        src = os.path.join(self.folder_path, email_attachment.attachment_filename)
-        if not os.path.exists(src):
-            raise FileNotFoundError(f"Demo file not found: {src}")
-        dest = os.path.join(dest_dir, email_attachment.attachment_filename)
-        os.makedirs(dest_dir, exist_ok=True)
-        shutil.copy2(src, dest)
-        email_attachment.local_path = dest
-        return dest
-
-    def mark_as_read(self, email_attachment: EmailAttachment):
-        pass
