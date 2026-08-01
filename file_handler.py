@@ -41,6 +41,25 @@ def file_invoice(src_path: str, dest_dir: str, new_filename: str):
     return safe_name, dest_path
 
 
+def repair_activity_log_schema():
+    if not os.path.exists(ACTIVITY_LOG_PATH):
+        return
+    with open(ACTIVITY_LOG_PATH, 'r', newline='', encoding='utf-8') as f:
+        rows = list(csv.reader(f))
+    if not rows:
+        return
+    new_header = ['timestamp', 'action', 'original_filename', 'final_filename', 'vendor', 'invoice_number', 'po_number', 'status']
+    if rows[0] == new_header:
+        return
+    rows[0] = new_header
+    for row in rows[1:]:
+        while len(row) < 8:
+            row.insert(6, '')
+    with open(ACTIVITY_LOG_PATH, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerows(rows)
+
+
 def log_activity(timestamp, action, original_filename, final_filename, vendor, invoice_number, status, po_number=''):
     if not timestamp:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')

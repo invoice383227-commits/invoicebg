@@ -13,7 +13,7 @@ from mailbox import IMAPMailboxFetcher, EmailAttachment
 from classifier import classify_pdf
 from extractor import resolve_vendor_name, extract_invoice_number, extract_po_number
 from file_handler import (
-    create_folder_structure, file_invoice, log_activity,
+    create_folder_structure, file_invoice, log_activity, repair_activity_log_schema,
     INCOMING_DIR, PROCESSED_DIR, SCANNED_DIR, UNRESOLVED_DIR,
     ACTIVITY_LOG_PATH, get_manual_review_files, get_processed_files,
 )
@@ -348,6 +348,7 @@ def tab_processed_files():
 def tab_activity_log():
     st.header("Activity Log")
     if os.path.exists(ACTIVITY_LOG_PATH):
+        repair_activity_log_schema()
         df = pd.read_csv(ACTIVITY_LOG_PATH)
         st.dataframe(df, width='stretch')
     else:
