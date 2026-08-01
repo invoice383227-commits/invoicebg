@@ -20,7 +20,7 @@ def create_folder_structure():
     if not os.path.exists(ACTIVITY_LOG_PATH):
         with open(ACTIVITY_LOG_PATH, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(['timestamp', 'action', 'original_filename', 'final_filename', 'vendor', 'invoice_number', 'status'])
+            writer.writerow(['timestamp', 'action', 'original_filename', 'final_filename', 'vendor', 'invoice_number', 'po_number', 'status'])
 
 
 def get_unique_filename(dest_dir: str, filename: str) -> str:
@@ -41,12 +41,12 @@ def file_invoice(src_path: str, dest_dir: str, new_filename: str):
     return safe_name, dest_path
 
 
-def log_activity(timestamp, action, original_filename, final_filename, vendor, invoice_number, status):
+def log_activity(timestamp, action, original_filename, final_filename, vendor, invoice_number, status, po_number=''):
     if not timestamp:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with open(ACTIVITY_LOG_PATH, 'a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow([timestamp, action, original_filename, final_filename, vendor, invoice_number, status])
+        writer.writerow([timestamp, action, original_filename, final_filename, vendor, invoice_number, po_number, status])
 
 
 def get_manual_review_files():

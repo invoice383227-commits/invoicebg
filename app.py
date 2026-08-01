@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mailbox import IMAPMailboxFetcher, EmailAttachment
 from classifier import classify_pdf
-from extractor import resolve_vendor_name, extract_invoice_number
+from extractor import resolve_vendor_name, extract_invoice_number, extract_po_number
 from file_handler import (
     create_folder_structure, file_invoice, log_activity,
     INCOMING_DIR, PROCESSED_DIR, SCANNED_DIR, UNRESOLVED_DIR,
@@ -32,11 +32,13 @@ class InvoiceItem:
     extracted_text: str
     vendor_name: str
     invoice_number: str
+    po_number: str
     proposed_filename: str
     filed: bool = False
     sent_to_review: bool = False
     editable_vendor: str = ''
     editable_inv: str = ''
+    editable_po: str = ''
     dest_path: str = ''
 
 
@@ -73,9 +75,11 @@ def fetch_and_process(fetcher):
                     if is_digital == 'digital':
                         vendor = resolve_vendor_name(email_att.sender, extracted_text)
                         inv_num = extract_invoice_number(extracted_text)
+                        po_num = extract_po_number(extracted_text)
                     else:
                         vendor = ''
                         inv_num = ''
+                        po_num = ''
 
                     item = InvoiceItem(
                         email_uid=email_att.email_uid,
@@ -88,12 +92,14 @@ def fetch_and_process(fetcher):
                         extracted_text=extracted_text,
                         vendor_name=vendor or '',
                         invoice_number=inv_num or '',
+                        po_number=po_num or '',
                         proposed_filename='',
                         editable_vendor=vendor or '',
                         editable_inv=inv_num or '',
+                        editable_po=po_num or '',
                     )
-                    if vendor and inv_num:
-                        item.proposed_filename = f"{vendor}_{inv_num}.pdf"
+                    if vendor and inv_num and po_num:
+                        item.proposed_filename = f"{vendor}_{inv_num}_{po_num}.pdf"
                     st.session_state.invoice_items.append(item)
                 except Exception as e:
                     st.error(f"Error processing {email_att.attachment_filename}: {e}")
@@ -129,6 +135,7 @@ def confirm_file_item(item_idx, item, fetcher):
         final_filename=safe_name,
         vendor=item.editable_vendor or item.vendor_name,
         invoice_number=item.editable_inv or item.invoice_number,
+        po_number=item.editable_po or item.po_number,
         status='digital',
     )
     if fetcher:
@@ -158,13 +165,14 @@ def send_to_review(item_idx, item, fetcher):
         action='sent_to_manual_review',
         original_filename=item.original_filename,
         final_filename=safe_name,
-        vendor=item.vendor_name,
-        invoice_number=item.invoice_number,
+        vendor=item.editable_vendor or item.vendor_name,
+        invoice_number=item.editable_inv or item.invoice_number,
+        po_number=item.editable_po or item.po_number,
         status='scanned' if not item.is_digital else 'unresolved',
     )
     if fetcher:
         try:
-            fetcher.mark_as_read(EmailAttachment(
+            fetcher.mark_as_unread(EmailAttachment(
                 sender=item.sender,
                 subject=item.subject,
                 date=item.date,
@@ -174,7 +182,7 @@ def send_to_review(item_idx, item, fetcher):
         except Exception:
             pass
     st.session_state.invoice_items[item_idx].sent_to_review = True
-    st.success(f"Moved to manual review as {safe_name}")
+    st.success(f"Moved to manual review as {safe_name} (email left unread)")
     st.rerun()
 
 
@@ -242,12 +250,16 @@ def tab_process_invoices(fetcher):
                     if item.is_digital:
                         vendor_key = f"vendor_{idx}"
                         inv_key = f"inv_{idx}"
+                        po_key = f"po_{idx}"
                         ev = st.text_input("Vendor", value=item.editable_vendor or item.vendor_name, key=vendor_key)
                         ei = st.text_input("Invoice #", value=item.editable_inv or item.invoice_number, key=inv_key)
+                        ep = st.text_input("PO #", value=item.editable_po or item.po_number, key=po_key)
                         item.editable_vendor = ev
                         item.editable_inv = ei
+                        item.editable_po = ep
 
-                        proposed = f"{ev}_{ei}.pdf" if ev and ei else item.original_filename
+                        parts = [p for p in (ev, ei, ep) if p]
+                        proposed = f"{'_'.join(parts)}.pdf" if parts else item.original_filename
                         name_key = f"name_{idx}"
                         st.text_input("Filename", value=proposed, key=name_key, disabled=False)
                         item.proposed_filename = proposed

@@ -8,9 +8,22 @@ INVOICE_NUM_PATTERNS = [
     re.compile(r'Invoice\s*#?\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-]*\d[A-Z0-9\-]*)', re.IGNORECASE),
 ]
 
+PO_NUMBER_PATTERNS = [
+    re.compile(r'(?:P\.?O\.?|Purchase\s*Order|Customer\s*Order|Order)\s*(?:Number|No|#)?\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-]*\d[A-Z0-9\-]*)', re.IGNORECASE),
+    re.compile(r'PO\s*#?\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-]*\d[A-Z0-9\-]*)', re.IGNORECASE),
+]
+
 
 def extract_invoice_number(text: str):
     for pattern in INVOICE_NUM_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def extract_po_number(text: str):
+    for pattern in PO_NUMBER_PATTERNS:
         match = pattern.search(text)
         if match:
             return match.group(1).strip()

@@ -104,3 +104,10 @@ class IMAPMailboxFetcher:
         mail.store(email_attachment.email_uid.encode(), '+FLAGS', '\\Seen')
         mail.logout()
 
+    def mark_as_unread(self, email_attachment: EmailAttachment):
+        mail = imaplib.IMAP4_SSL(self.host)
+        mail.login(self.username, self.password)
+        mail.select('INBOX')
+        mail.store(email_attachment.email_uid.encode(), '-FLAGS', '\\Seen')
+        mail.logout()
+
