@@ -142,6 +142,7 @@ def fetch_and_process(fetcher):
                     st.session_state.fetched = True
                 progress_bar.progress((i + 1) / len(emails))
             st.session_state.fetched = True
+            st.session_state.edit_idx = None
             st.rerun()
         except Exception as e:
             st.error(f"Failed to check inbox: {e}")
@@ -392,6 +393,10 @@ def tab_dashboard(fetcher):
                 elif item.sent_to_review:
                     st.caption("Waiting for manual review")
                 else:
+                    if st.button("Edit this invoice", key=f"dash_edit_{idx}", width='stretch'):
+                        st.session_state.edit_idx = idx
+                        st.session_state.active_tab = "Process Invoices"
+                        st.rerun()
                     if st.button("Confirm & File", key=f"dash_file_{idx}", width='stretch'):
                         confirm_file_item(idx, item, fetcher)
                     if st.button("Send to Manual Review", key=f"dash_review_{idx}", width='stretch'):
@@ -441,6 +446,37 @@ def tab_dashboard(fetcher):
         )
 
 
+def _render_editable_fields(item, idx):
+    vendor_key = f"vendor_{idx}"
+    inv_key = f"inv_{idx}"
+    po_key = f"po_{idx}"
+    ev = st.text_input("Vendor", value=item.editable_vendor or item.vendor_name, key=vendor_key)
+    ei = st.text_input("Invoice #", value=item.editable_inv or item.invoice_number, key=inv_key)
+    ep = st.text_input("PO #", value=item.editable_po or item.po_number, key=po_key)
+    item.editable_vendor = ev
+    item.editable_inv = ei
+    item.editable_po = ep
+
+    parts = [p for p in (ev, ei, ep) if p]
+    proposed = f"{'_'.join(parts)}.pdf" if parts else item.original_filename
+    name_key = f"name_{idx}"
+    st.text_input("Filename", value=proposed, key=name_key, disabled=False)
+    item.proposed_filename = proposed
+    return ev, ei, ep
+
+
+def _render_action_buttons(item, idx, fetcher):
+    if item.filed:
+        return
+    if item.sent_to_review:
+        return
+    if item.is_digital:
+        if st.button("Confirm & File", key=f"file_{idx}", width='stretch'):
+            confirm_file_item(idx, item, fetcher)
+    if st.button("Send to Manual Review", key=f"review_{idx}", width='stretch'):
+        send_to_review(idx, item, fetcher)
+
+
 def tab_process_invoices(fetcher):
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -451,6 +487,30 @@ def tab_process_invoices(fetcher):
                 st.error("Configure mailbox access in the sidebar.")
             else:
                 fetch_and_process(fetcher)
+
+    edit_idx = st.session_state.get("edit_idx")
+    if edit_idx is not None and 0 <= edit_idx < len(st.session_state.invoice_items):
+        focus_item = st.session_state.invoice_items[edit_idx]
+        if not focus_item.filed and not focus_item.sent_to_review:
+            st.subheader("Editing selected invoice")
+            with st.container(border=True):
+                fcols = st.columns([2.5, 2, 2, 1.5])
+                with fcols[0]:
+                    st.markdown(f"**From:** {focus_item.sender}")
+                    st.markdown(f"**Subject:** {focus_item.subject}")
+                    st.markdown(f"**Date:** {focus_item.date}")
+                    if focus_item.total:
+                        st.markdown(f"**Total:** {focus_item.currency}{focus_item.total}")
+                with fcols[1]:
+                    _render_editable_fields(focus_item, edit_idx)
+                with fcols[2]:
+                    img = render_pdf_preview(focus_item.local_path)
+                    if img:
+                        st.image(img, width=200)
+                    else:
+                        st.markdown("*Preview unavailable*")
+                with fcols[3]:
+                    _render_action_buttons(focus_item, edit_idx, fetcher)
 
     if st.session_state.invoice_items:
         pending = [i for i in st.session_state.invoice_items if not i.filed and not i.sent_to_review]
@@ -488,21 +548,7 @@ def tab_process_invoices(fetcher):
 
                 with cols[1]:
                     if item.is_digital:
-                        vendor_key = f"vendor_{idx}"
-                        inv_key = f"inv_{idx}"
-                        po_key = f"po_{idx}"
-                        ev = st.text_input("Vendor", value=item.editable_vendor or item.vendor_name, key=vendor_key)
-                        ei = st.text_input("Invoice #", value=item.editable_inv or item.invoice_number, key=inv_key)
-                        ep = st.text_input("PO #", value=item.editable_po or item.po_number, key=po_key)
-                        item.editable_vendor = ev
-                        item.editable_inv = ei
-                        item.editable_po = ep
-
-                        parts = [p for p in (ev, ei, ep) if p]
-                        proposed = f"{'_'.join(parts)}.pdf" if parts else item.original_filename
-                        name_key = f"name_{idx}"
-                        st.text_input("Filename", value=proposed, key=name_key, disabled=False)
-                        item.proposed_filename = proposed
+                        _render_editable_fields(item, idx)
                     else:
                         st.markdown("**Scanned document**")
                         st.markdown("No text layer available for extraction.")
@@ -515,11 +561,7 @@ def tab_process_invoices(fetcher):
                         st.markdown("*Preview unavailable*")
 
                 with cols[3]:
-                    if item.is_digital:
-                        if st.button("Confirm & File", key=f"file_{idx}", width='stretch'):
-                            confirm_file_item(idx, item, fetcher)
-                    if st.button("Send to Manual Review", key=f"review_{idx}", width='stretch'):
-                        send_to_review(idx, item, fetcher)
+                    _render_action_buttons(item, idx, fetcher)
         filed_items_section()
 
     elif st.session_state.get('fetched'):
@@ -720,6 +762,10 @@ def main():
         st.session_state.invoices_db = load_db(DB_PATH)
     if 'auto_checked' not in st.session_state:
         st.session_state.auto_checked = False
+    if 'active_tab' not in st.session_state:
+        st.session_state.active_tab = "Dashboard"
+    if 'edit_idx' not in st.session_state:
+        st.session_state.edit_idx = None
 
     create_folder_structure()
 
@@ -729,7 +775,7 @@ def main():
         st.session_state.auto_checked = True
         fetch_and_process(fetcher)
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tabs = [
         "Dashboard",
         "Process Invoices",
         "Needs Manual Review",
@@ -737,21 +783,31 @@ def main():
         "Activity Log",
         "Vendor Mapping",
         "Invoice Database",
-    ])
+    ]
+    tab_cols = st.columns(len(tabs))
+    for i, t in enumerate(tabs):
+        with tab_cols[i]:
+            active = st.session_state.active_tab == t
+            if st.button(t, key=f"nav_{i}_{t}", width='stretch', type="primary" if active else "secondary"):
+                st.session_state.active_tab = t
+                st.session_state.edit_idx = None
+                st.rerun()
 
-    with tab1:
+    st.divider()
+
+    if st.session_state.active_tab == "Dashboard":
         tab_dashboard(fetcher)
-    with tab2:
+    elif st.session_state.active_tab == "Process Invoices":
         tab_process_invoices(fetcher)
-    with tab3:
+    elif st.session_state.active_tab == "Needs Manual Review":
         tab_manual_review()
-    with tab4:
+    elif st.session_state.active_tab == "Processed Files":
         tab_processed_files()
-    with tab5:
+    elif st.session_state.active_tab == "Activity Log":
         tab_activity_log()
-    with tab6:
+    elif st.session_state.active_tab == "Vendor Mapping":
         tab_vendor_mapping()
-    with tab7:
+    else:
         tab_invoice_database()
 
 
