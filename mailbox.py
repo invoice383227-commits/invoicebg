@@ -62,6 +62,47 @@ class IMAPMailboxFetcher:
         mail.logout()
         return results
 
+    def fetch_recent_invoice_emails(self, count: int = 3) -> List[EmailAttachment]:
+        mail = imaplib.IMAP4_SSL(self.host)
+        mail.login(self.username, self.password)
+        mail.select('INBOX')
+
+        status, messages = mail.search(None, 'ALL')
+        results: List[EmailAttachment] = []
+
+        if status != 'OK':
+            mail.logout()
+            return results
+
+        for num in messages[0].split()[-count:]:
+            uid = num.decode()
+            status, msg_data = mail.fetch(num, '(RFC822)')
+            if status != 'OK':
+                continue
+
+            raw_email = msg_data[0][1]
+            msg = email.message_from_bytes(raw_email)
+
+            sender = str(msg.get('From', '')).strip()
+            subject = str(msg.get('Subject', '')).strip()
+            date = str(msg.get('Date', '')).strip()
+
+            for part in msg.walk():
+                if part.get_content_maintype() == 'multipart':
+                    continue
+                fn = part.get_filename()
+                if fn and fn.lower().endswith('.pdf'):
+                    results.append(EmailAttachment(
+                        sender=sender,
+                        subject=subject,
+                        date=date,
+                        email_uid=uid,
+                        attachment_filename=str(fn),
+                    ))
+
+        mail.logout()
+        return results
+
     def download_attachment(self, email_attachment: EmailAttachment, dest_dir: str) -> str:
         mail = imaplib.IMAP4_SSL(self.host)
         mail.login(self.username, self.password)

@@ -74,7 +74,10 @@ def render_pdf_preview(pdf_path):
 def fetch_and_process(fetcher):
     with st.spinner("Checking for new invoices..."):
         try:
-            emails = fetcher.fetch_unread_invoice_emails()
+            if st.session_state.get("test_mode", True):
+                emails = fetcher.fetch_recent_invoice_emails(3)
+            else:
+                emails = fetcher.fetch_unread_invoice_emails()
             if not emails:
                 st.info("No new invoice emails found.")
                 st.session_state.fetched = True
@@ -173,7 +176,7 @@ def confirm_file_item(item_idx, item, fetcher):
 
     db = st.session_state.get("invoices_db", empty_db())
 
-    if is_duplicate(inv_num, vendor, db):
+    if not st.session_state.get("test_mode", True) and is_duplicate(inv_num, vendor, db):
         dest = UNRESOLVED_DIR
         safe_name, dest_path = file_invoice(item.local_path, dest, item.original_filename)
         log_activity(
@@ -742,6 +745,14 @@ def sidebar_config():
         )
         st.session_state.orig_dir = orig_dir
         st.session_state.proc_dir = proc_dir
+
+        st.divider()
+        st.subheader("Test mode")
+        st.session_state.test_mode = st.checkbox(
+            "Fetch last 3 invoices even if already processed",
+            value=st.session_state.get("test_mode", True),
+            help="For testing only — ignores seen/duplicate status.",
+        )
 
         st.divider()
         st.caption("Invoice Intake v1.0")
