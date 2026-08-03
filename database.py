@@ -77,7 +77,7 @@ def save_db(df, path=DB_PATH):
             placeholders = ','.join(['?'] * len(DB_COLUMNS))
             cols = ','.join(DB_COLUMNS)
             conn.executemany(
-                f'INSERT INTO invoices ({cols}) VALUES ({placeholders})',
+                f'INSERT OR REPLACE INTO invoices ({cols}) VALUES ({placeholders})',
                 [[r.get(c, '') for c in DB_COLUMNS] for r in records],
             )
         conn.commit()
@@ -106,6 +106,14 @@ def add_invoice(record, df):
         rec['extra_fields'] = json.dumps(rec['extra_fields'], default=str)
     new_row = pd.DataFrame([rec], columns=DB_COLUMNS)
     return pd.concat([df, new_row], ignore_index=True)
+
+
+def delete_invoice(df, pos, path=DB_PATH):
+    if df is None or len(df) == 0:
+        return empty_db()
+    df = df.drop(df.index[pos]).reset_index(drop=True)
+    save_db(df, path)
+    return df
 
 
 def csv_bytes(df):

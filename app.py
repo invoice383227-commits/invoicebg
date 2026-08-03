@@ -24,7 +24,7 @@ from file_handler import (
 from config_manager import load_vendor_mapping, add_vendor_mapping
 from database import (
     DB_PATH, DB_COLUMNS, load_db, save_db, is_duplicate, add_invoice,
-    csv_bytes, empty_db, init_db, import_spreadsheet,
+    csv_bytes, empty_db, init_db, import_spreadsheet, delete_invoice,
 )
 
 
@@ -176,22 +176,26 @@ def confirm_file_item(item_idx, item, fetcher):
 
     db = st.session_state.get("invoices_db", empty_db())
 
-    if not st.session_state.get("test_mode", True) and is_duplicate(inv_num, vendor, db):
-        dest = UNRESOLVED_DIR
-        safe_name, dest_path = file_invoice(item.local_path, dest, item.original_filename)
-        log_activity(
-            timestamp=item.date,
-            action='duplicate_sent_to_manual_review',
-            original_filename=item.original_filename,
-            final_filename=safe_name,
-            vendor=vendor,
-            invoice_number=inv_num,
-            po_number=po_num,
-            status='duplicate',
-        )
-        _send_duplicate_to_review(item_idx, item, fetcher, safe_name, dest_path)
-        st.rerun()
-        return
+    dup = is_duplicate(inv_num, vendor, db)
+    if dup:
+        if st.session_state.get("test_mode", True):
+            st.warning(f"Duplicate invoice detected ({inv_num} / {vendor}) — the existing database record will be updated.")
+        else:
+            dest = UNRESOLVED_DIR
+            safe_name, dest_path = file_invoice(item.local_path, dest, item.original_filename)
+            log_activity(
+                timestamp=item.date,
+                action='duplicate_sent_to_manual_review',
+                original_filename=item.original_filename,
+                final_filename=safe_name,
+                vendor=vendor,
+                invoice_number=inv_num,
+                po_number=po_num,
+                status='duplicate',
+            )
+            _send_duplicate_to_review(item_idx, item, fetcher, safe_name, dest_path)
+            st.rerun()
+            return
 
     new_filename = item.proposed_filename or item.original_filename
     safe_name, dest_path = file_invoice(item.local_path, PROCESSED_DIR, new_filename)
@@ -673,6 +677,24 @@ def tab_invoice_database():
     db = st.session_state.get("invoices_db", empty_db())
     if len(db) > 0:
         st.dataframe(db, width='stretch')
+
+        st.divider()
+        st.subheader("Delete a record")
+        labels = [
+            f"#{pos} | {row.vendor} | {row.invoice_number} | {row.invoice_date} | {row.total} {row.currency}"
+            for pos, row in enumerate(db.itertuples())
+        ]
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            sel = st.selectbox("Select record to delete", labels, key="db_delete_sel")
+        with c2:
+            st.markdown("")
+            if st.button("Delete Selected Record", key="db_delete_btn"):
+                pos = labels.index(sel)
+                db = delete_invoice(db, pos, DB_PATH)
+                st.session_state.invoices_db = db
+                st.warning("Record deleted from the database.")
+                st.rerun()
     else:
         st.info("No records yet.")
 
