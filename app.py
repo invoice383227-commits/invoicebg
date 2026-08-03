@@ -23,7 +23,8 @@ from file_handler import (
 )
 from config_manager import load_vendor_mapping, add_vendor_mapping
 from database import (
-    DB_PATH, DB_COLUMNS, load_db, save_db, is_duplicate, add_invoice, db_bytes, empty_db,
+    DB_PATH, DB_COLUMNS, load_db, save_db, is_duplicate, add_invoice,
+    csv_bytes, empty_db, init_db, import_spreadsheet,
 )
 
 
@@ -467,26 +468,24 @@ def tab_invoice_database():
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        uploaded = st.file_uploader("Upload existing spreadsheet (to check for duplicates)", type=["xlsx"])
+        st.subheader("Upload spreadsheet")
+        uploaded = st.file_uploader("Upload a CSV backup to restore the database (e.g. if the database is missing)", type=["csv"])
         if uploaded is not None:
             try:
-                df = pd.read_excel(uploaded)
-                for col in DB_COLUMNS:
-                    if col not in df.columns:
-                        df[col] = ''
-                st.session_state.invoices_db = df[DB_COLUMNS]
-                st.success(f"Loaded {len(st.session_state.invoices_db)} records from uploaded spreadsheet.")
+                db = import_spreadsheet(uploaded.getvalue(), DB_PATH)
+                st.session_state.invoices_db = db
+                st.success(f"Imported {len(db)} records into the database.")
             except Exception as e:
-                st.error(f"Could not read uploaded spreadsheet: {e}")
+                st.error(f"Could not import spreadsheet: {e}")
     with col2:
-        st.subheader("Download spreadsheet")
+        st.subheader("Download backup")
         db = st.session_state.get("invoices_db", empty_db())
         if len(db) > 0:
             st.download_button(
-                label="Download Invoice Database (.xlsx)",
-                data=db_bytes(db),
-                file_name="invoices.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                label="Download Invoice Database (.csv)",
+                data=csv_bytes(db),
+                file_name="invoices.csv",
+                mime="text/csv",
                 key="dl_db",
             )
         else:
@@ -585,6 +584,7 @@ def main():
     if 'fetched' not in st.session_state:
         st.session_state.fetched = False
     if 'invoices_db' not in st.session_state:
+        init_db(DB_PATH)
         st.session_state.invoices_db = load_db(DB_PATH)
 
     create_folder_structure()

@@ -1,14 +1,47 @@
 import os
 import json
+import sqlite3
+import io
 
 import pandas as pd
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'invoice_intake', 'invoices.xlsx')
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'invoice_intake', 'invoices.db')
 DB_COLUMNS = [
     'timestamp', 'sender', 'vendor', 'invoice_number', 'po_number',
     'invoice_date', 'terms', 'subtotal', 'tax', 'total', 'currency',
     'extra_fields', 'filename', 'original_filename',
 ]
+
+_CREATE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT,
+    sender TEXT,
+    vendor TEXT,
+    invoice_number TEXT,
+    po_number TEXT,
+    invoice_date TEXT,
+    terms TEXT,
+    subtotal TEXT,
+    tax TEXT,
+    total TEXT,
+    currency TEXT,
+    extra_fields TEXT,
+    filename TEXT,
+    original_filename TEXT,
+    UNIQUE (vendor, invoice_number)
+)
+"""
+
+
+def _connect(path=DB_PATH):
+    conn = sqlite3.connect(path)
+    conn.execute(_CREATE_TABLE_SQL)
+    return conn
+
+
+def init_db(path=DB_PATH):
+    _connect(path).close()
 
 
 def empty_db():
@@ -19,8 +52,12 @@ def load_db(path=DB_PATH):
     if not os.path.exists(path):
         return empty_db()
     try:
-        df = pd.read_excel(path)
+        conn = sqlite3.connect(path)
+        df = pd.read_sql_query('SELECT * FROM invoices', conn)
+        conn.close()
     except Exception:
+        return empty_db()
+    if df is None or df.empty:
         return empty_db()
     for col in DB_COLUMNS:
         if col not in df.columns:
@@ -29,7 +66,23 @@ def load_db(path=DB_PATH):
 
 
 def save_db(df, path=DB_PATH):
-    df.to_excel(path, index=False)
+    conn = _connect(path)
+    try:
+        conn.execute('DELETE FROM invoices')
+        if df is not None and not df.empty:
+            records = df.to_dict('records')
+            for r in records:
+                if isinstance(r.get('extra_fields'), dict):
+                    r['extra_fields'] = json.dumps(r['extra_fields'], default=str)
+            placeholders = ','.join(['?'] * len(DB_COLUMNS))
+            cols = ','.join(DB_COLUMNS)
+            conn.executemany(
+                f'INSERT INTO invoices ({cols}) VALUES ({placeholders})',
+                [[r.get(c, '') for c in DB_COLUMNS] for r in records],
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def is_duplicate(invoice_number, vendor, df):
@@ -55,8 +108,17 @@ def add_invoice(record, df):
     return pd.concat([df, new_row], ignore_index=True)
 
 
-def db_bytes(df):
-    import io
+def csv_bytes(df):
     buf = io.BytesIO()
-    df.to_excel(buf, index=False)
+    df.to_csv(buf, index=False)
     return buf.getvalue()
+
+
+def import_spreadsheet(uploaded_bytes, path=DB_PATH):
+    df = pd.read_csv(io.BytesIO(uploaded_bytes))
+    for col in DB_COLUMNS:
+        if col not in df.columns:
+            df[col] = ''
+    df = df[DB_COLUMNS]
+    save_db(df, path)
+    return df
