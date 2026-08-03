@@ -18,6 +18,9 @@ from file_handler import (
     ACTIVITY_LOG_PATH, get_manual_review_files, get_processed_files,
 )
 from config_manager import load_vendor_mapping, add_vendor_mapping
+from database import (
+    DB_PATH, load_db, save_db, is_duplicate, add_invoice, db_bytes, empty_db,
+)
 
 
 @dataclass
@@ -111,8 +114,48 @@ def fetch_and_process(fetcher):
             st.error(f"Failed to check inbox: {e}")
 
 
+def _send_duplicate_to_review(item_idx, item, fetcher, safe_name, dest_path):
+    item = st.session_state.invoice_items[item_idx]
+    if fetcher:
+        try:
+            fetcher.mark_as_unread(EmailAttachment(
+                sender=item.sender,
+                subject=item.subject,
+                date=item.date,
+                email_uid=item.email_uid,
+                attachment_filename=item.original_filename,
+            ))
+        except Exception:
+            pass
+    item.sent_to_review = True
+    st.warning(f"Duplicate invoice — sent to manual review ({safe_name}), email left unread.")
+
+
 def confirm_file_item(item_idx, item, fetcher):
     item = st.session_state.invoice_items[item_idx]
+    vendor = item.editable_vendor or item.vendor_name
+    inv_num = item.editable_inv or item.invoice_number
+    po_num = item.editable_po or item.po_number
+
+    db = st.session_state.get("invoices_db", empty_db())
+
+    if is_duplicate(inv_num, vendor, db):
+        dest = UNRESOLVED_DIR
+        safe_name, dest_path = file_invoice(item.local_path, dest, item.original_filename)
+        log_activity(
+            timestamp=item.date,
+            action='duplicate_sent_to_manual_review',
+            original_filename=item.original_filename,
+            final_filename=safe_name,
+            vendor=vendor,
+            invoice_number=inv_num,
+            po_number=po_num,
+            status='duplicate',
+        )
+        _send_duplicate_to_review(item_idx, item, fetcher, safe_name, dest_path)
+        st.rerun()
+        return
+
     new_filename = item.proposed_filename or item.original_filename
     safe_name, dest_path = file_invoice(item.local_path, PROCESSED_DIR, new_filename)
 
@@ -128,14 +171,27 @@ def confirm_file_item(item_idx, item, fetcher):
         shutil.copy2(dest_path, os.path.join(proc_dir, safe_name))
         saved_to.append(proc_dir)
 
+    record = {
+        'timestamp': item.date,
+        'sender': item.sender,
+        'vendor': vendor,
+        'invoice_number': inv_num,
+        'po_number': po_num,
+        'filename': safe_name,
+        'original_filename': item.original_filename,
+    }
+    db = add_invoice(record, db)
+    save_db(db, DB_PATH)
+    st.session_state.invoices_db = db
+
     log_activity(
         timestamp=item.date,
         action='filed',
         original_filename=item.original_filename,
         final_filename=safe_name,
-        vendor=item.editable_vendor or item.vendor_name,
-        invoice_number=item.editable_inv or item.invoice_number,
-        po_number=item.editable_po or item.po_number,
+        vendor=vendor,
+        invoice_number=inv_num,
+        po_number=po_num,
         status='digital',
     )
     if fetcher:
@@ -355,6 +411,41 @@ def tab_activity_log():
         st.info("No activity logged yet.")
 
 
+def tab_invoice_database():
+    st.header("Invoice Database")
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        uploaded = st.file_uploader("Upload existing spreadsheet (to check for duplicates)", type=["xlsx"])
+        if uploaded is not None:
+            try:
+                st.session_state.invoices_db = pd.read_excel(uploaded)
+                st.success(f"Loaded {len(st.session_state.invoices_db)} records from uploaded spreadsheet.")
+            except Exception as e:
+                st.error(f"Could not read uploaded spreadsheet: {e}")
+    with col2:
+        st.subheader("Download spreadsheet")
+        db = st.session_state.get("invoices_db", empty_db())
+        if len(db) > 0:
+            st.download_button(
+                label="Download Invoice Database (.xlsx)",
+                data=db_bytes(db),
+                file_name="invoices.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_db",
+            )
+        else:
+            st.caption("No records yet — file invoices to populate the database.")
+
+    st.divider()
+    st.subheader("Records")
+    db = st.session_state.get("invoices_db", empty_db())
+    if len(db) > 0:
+        st.dataframe(db, width='stretch')
+    else:
+        st.info("No records yet.")
+
+
 def tab_vendor_mapping():
     st.header("Vendor Mapping")
     mapping = load_vendor_mapping()
@@ -438,17 +529,20 @@ def main():
         st.session_state.invoice_items = []
     if 'fetched' not in st.session_state:
         st.session_state.fetched = False
+    if 'invoices_db' not in st.session_state:
+        st.session_state.invoices_db = load_db(DB_PATH)
 
     create_folder_structure()
 
     fetcher = sidebar_config()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "Process Invoices",
         "Needs Manual Review",
         "Processed Files",
         "Activity Log",
         "Vendor Mapping",
+        "Invoice Database",
     ])
 
     with tab1:
@@ -461,6 +555,8 @@ def main():
         tab_activity_log()
     with tab5:
         tab_vendor_mapping()
+    with tab6:
+        tab_invoice_database()
 
 
 if __name__ == '__main__':
