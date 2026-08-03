@@ -46,8 +46,8 @@ class InvoiceItem:
     tax: str
     total: str
     currency: str
-    extra_fields: dict = field(default_factory=dict)
     proposed_filename: str
+    extra_fields: dict = field(default_factory=dict)
     filed: bool = False
     sent_to_review: bool = False
     editable_vendor: str = ''
