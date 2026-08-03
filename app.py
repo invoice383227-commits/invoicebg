@@ -178,24 +178,22 @@ def confirm_file_item(item_idx, item, fetcher):
 
     dup = is_duplicate(inv_num, vendor, db)
     if dup:
-        if st.session_state.get("test_mode", True):
-            st.warning(f"Duplicate invoice detected ({inv_num} / {vendor}) — the existing database record will be updated.")
-        else:
-            dest = UNRESOLVED_DIR
-            safe_name, dest_path = file_invoice(item.local_path, dest, item.original_filename)
-            log_activity(
-                timestamp=item.date,
-                action='duplicate_sent_to_manual_review',
-                original_filename=item.original_filename,
-                final_filename=safe_name,
-                vendor=vendor,
-                invoice_number=inv_num,
-                po_number=po_num,
-                status='duplicate',
-            )
-            _send_duplicate_to_review(item_idx, item, fetcher, safe_name, dest_path)
-            st.rerun()
-            return
+        st.warning(f"Duplicate invoice detected ({inv_num} / {vendor}) — sent to manual review.")
+        dest = UNRESOLVED_DIR
+        safe_name, dest_path = file_invoice(item.local_path, dest, item.original_filename)
+        log_activity(
+            timestamp=item.date,
+            action='duplicate_sent_to_manual_review',
+            original_filename=item.original_filename,
+            final_filename=safe_name,
+            vendor=vendor,
+            invoice_number=inv_num,
+            po_number=po_num,
+            status='duplicate',
+        )
+        _send_duplicate_to_review(item_idx, item, fetcher, safe_name, dest_path)
+        st.rerun()
+        return
 
     new_filename = item.proposed_filename or item.original_filename
     safe_name, dest_path = file_invoice(item.local_path, PROCESSED_DIR, new_filename)
