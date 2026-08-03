@@ -11,7 +11,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mailbox import IMAPMailboxFetcher, EmailAttachment
 from classifier import classify_pdf
-from extractor import resolve_vendor_name, extract_invoice_number, extract_po_number
+from extractor import (
+    resolve_vendor_name, extract_invoice_number, extract_po_number,
+    extract_invoice_date, extract_terms, extract_subtotal,
+    extract_tax, extract_total, extract_currency,
+)
 from file_handler import (
     create_folder_structure, file_invoice, log_activity, repair_activity_log_schema,
     INCOMING_DIR, PROCESSED_DIR, SCANNED_DIR, UNRESOLVED_DIR,
@@ -19,7 +23,7 @@ from file_handler import (
 )
 from config_manager import load_vendor_mapping, add_vendor_mapping
 from database import (
-    DB_PATH, load_db, save_db, is_duplicate, add_invoice, db_bytes, empty_db,
+    DB_PATH, DB_COLUMNS, load_db, save_db, is_duplicate, add_invoice, db_bytes, empty_db,
 )
 
 
@@ -36,6 +40,12 @@ class InvoiceItem:
     vendor_name: str
     invoice_number: str
     po_number: str
+    invoice_date: str
+    terms: str
+    subtotal: str
+    tax: str
+    total: str
+    currency: str
     proposed_filename: str
     filed: bool = False
     sent_to_review: bool = False
@@ -79,10 +89,22 @@ def fetch_and_process(fetcher):
                         vendor = resolve_vendor_name(email_att.sender, extracted_text)
                         inv_num = extract_invoice_number(extracted_text)
                         po_num = extract_po_number(extracted_text)
+                        inv_date = extract_invoice_date(extracted_text)
+                        terms = extract_terms(extracted_text)
+                        subtotal = extract_subtotal(extracted_text)
+                        tax = extract_tax(extracted_text)
+                        total = extract_total(extracted_text)
+                        currency = extract_currency(extracted_text)
                     else:
                         vendor = ''
                         inv_num = ''
                         po_num = ''
+                        inv_date = ''
+                        terms = ''
+                        subtotal = ''
+                        tax = ''
+                        total = ''
+                        currency = ''
 
                     item = InvoiceItem(
                         email_uid=email_att.email_uid,
@@ -96,6 +118,12 @@ def fetch_and_process(fetcher):
                         vendor_name=vendor or '',
                         invoice_number=inv_num or '',
                         po_number=po_num or '',
+                        invoice_date=inv_date or '',
+                        terms=terms or '',
+                        subtotal=subtotal or '',
+                        tax=tax or '',
+                        total=total or '',
+                        currency=currency or '',
                         proposed_filename='',
                         editable_vendor=vendor or '',
                         editable_inv=inv_num or '',
@@ -177,6 +205,12 @@ def confirm_file_item(item_idx, item, fetcher):
         'vendor': vendor,
         'invoice_number': inv_num,
         'po_number': po_num,
+        'invoice_date': item.invoice_date,
+        'terms': item.terms,
+        'subtotal': item.subtotal,
+        'tax': item.tax,
+        'total': item.total,
+        'currency': item.currency,
         'filename': safe_name,
         'original_filename': item.original_filename,
     }
@@ -299,6 +333,16 @@ def tab_process_invoices(fetcher):
                     st.markdown(f"**Date:** {item.date}")
                     if item.is_digital:
                         st.markdown("**:green[Digital]** — text layer detected")
+                        if item.invoice_date:
+                            st.markdown(f"**Invoice Date:** {item.invoice_date}")
+                        if item.terms:
+                            st.markdown(f"**Terms:** {item.terms}")
+                        if item.subtotal:
+                            st.markdown(f"**Subtotal:** {item.currency}{item.subtotal}")
+                        if item.tax:
+                            st.markdown(f"**Tax:** {item.currency}{item.tax}")
+                        if item.total:
+                            st.markdown(f"**Total:** {item.currency}{item.total}")
                     else:
                         st.markdown("**:red[Scanned]** — auto-flagged for manual review")
 
@@ -419,7 +463,11 @@ def tab_invoice_database():
         uploaded = st.file_uploader("Upload existing spreadsheet (to check for duplicates)", type=["xlsx"])
         if uploaded is not None:
             try:
-                st.session_state.invoices_db = pd.read_excel(uploaded)
+                df = pd.read_excel(uploaded)
+                for col in DB_COLUMNS:
+                    if col not in df.columns:
+                        df[col] = ''
+                st.session_state.invoices_db = df[DB_COLUMNS]
                 st.success(f"Loaded {len(st.session_state.invoices_db)} records from uploaded spreadsheet.")
             except Exception as e:
                 st.error(f"Could not read uploaded spreadsheet: {e}")

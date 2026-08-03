@@ -3,7 +3,11 @@ import os
 import pandas as pd
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'invoice_intake', 'invoices.xlsx')
-DB_COLUMNS = ['timestamp', 'sender', 'vendor', 'invoice_number', 'po_number', 'filename', 'original_filename']
+DB_COLUMNS = [
+    'timestamp', 'sender', 'vendor', 'invoice_number', 'po_number',
+    'invoice_date', 'terms', 'subtotal', 'tax', 'total', 'currency',
+    'filename', 'original_filename',
+]
 
 
 def empty_db():
