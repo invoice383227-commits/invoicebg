@@ -327,70 +327,118 @@ def _dash_df():
     return df
 
 
-def tab_dashboard():
+def tab_dashboard(fetcher):
     st.header("Dashboard")
 
-    df = _dash_df()
-    if df is None or df.empty:
-        st.info("No processed invoices yet. File invoices to populate the dashboard.")
-        return
+    items = st.session_state.invoice_items
+    db = st.session_state.get("invoices_db", empty_db())
+    df = _dash_df() if db is not None and len(db) > 0 else empty_db()
 
-    total_count = len(df)
-    total_amount = df['total_num'].sum()
-    vendor_count = df['vendor'].nunique() if 'vendor' in df.columns else 0
-    avg_amount = total_amount / total_count if total_count else 0
+    pending = [i for i in items if not i.filed and not i.sent_to_review]
+    filed_sess = [i for i in items if i.filed]
+    review = [i for i in items if i.sent_to_review]
+    filed_total = len(db) if db is not None else 0
+    total_amount = df['total_num'].sum() if df is not None and len(df) > 0 else 0
+    vendor_count = df['vendor'].nunique() if df is not None and len(df) > 0 and 'vendor' in df.columns else 0
+    avg_amount = total_amount / filed_total if filed_total else 0
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Invoices Filed", total_count)
-    c2.metric("Total Value", f"${total_amount:,.2f}")
-    c3.metric("Vendors", vendor_count)
-    c4.metric("Avg Invoice", f"${avg_amount:,.2f}")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Pending", len(pending))
+    c2.metric("Filed", filed_total)
+    c3.metric("In Review", len(review))
+    c4.metric("Total Value", f"${total_amount:,.2f}")
+    c5.metric("Vendors", vendor_count)
+
+    st.divider()
+    st.subheader("Invoice Workflow")
+
+    if not items:
+        st.info("No invoices fetched yet. Click **Check Inbox** or they are checked automatically on launch.")
+
+    for idx, item in enumerate(items):
+        with st.container(border=True):
+            c1, c2, c3 = st.columns([2.5, 2, 1.5])
+            with c1:
+                status = "**:green[Filed]**" if item.filed else ("**:orange[In Review]**" if item.sent_to_review else "**:blue[Pending]**")
+                st.markdown(f"**{item.proposed_filename or item.original_filename}**  {status}")
+                st.markdown(f"**Vendor:** {item.editable_vendor or item.vendor_name}  ·  **Invoice #:** {item.editable_inv or item.invoice_number}  ·  **PO #:** {item.editable_po or item.po_number}")
+                if item.invoice_date:
+                    st.markdown(f"**Invoice Date:** {item.invoice_date}  ·  **Terms:** {item.terms}")
+                if item.total:
+                    st.markdown(f"**Total:** {item.currency}{item.total}  ({item.currency}{item.subtotal} + {item.currency}{item.tax} tax)")
+                for k, v in item.extra_fields.items():
+                    st.markdown(f"**{k.replace('_', ' ').title()}:** {v}")
+                st.caption(f"{item.sender} · {item.date}")
+            with c2:
+                img = render_pdf_preview(item.local_path)
+                if img:
+                    st.image(img, width=200)
+                else:
+                    st.markdown("*Preview unavailable*")
+            with c3:
+                if item.filed:
+                    try:
+                        with open(item.dest_path, 'rb') as f:
+                            file_bytes = f.read()
+                        st.download_button(
+                            label="Download PDF",
+                            data=file_bytes,
+                            file_name=item.proposed_filename or item.original_filename,
+                            mime="application/pdf",
+                            key=f"dash_dl_filed_{idx}_{item.email_uid}",
+                        )
+                    except FileNotFoundError:
+                        st.caption("File unavailable")
+                elif item.sent_to_review:
+                    st.caption("Waiting for manual review")
+                else:
+                    if st.button("Confirm & File", key=f"dash_file_{idx}", width='stretch'):
+                        confirm_file_item(idx, item, fetcher)
+                    if st.button("Send to Manual Review", key=f"dash_review_{idx}", width='stretch'):
+                        send_to_review(idx, item, fetcher)
 
     st.divider()
 
     col_filters, col_charts = st.columns([1, 2])
     with col_filters:
-        st.subheader("Filters")
-        vendors = ['All'] + sorted(df['vendor'].dropna().unique().tolist())
-        sel_vendor = st.selectbox("Vendor", vendors, key="dash_vendor")
-        date_col = 'invoice_date' if 'invoice_date' in df.columns else 'timestamp'
-        months = sorted(df[date_col].dropna().unique().tolist())
-        if months:
-            sel_month = st.selectbox("Invoice Date", ['All'] + months, key="dash_month")
+        st.subheader("Analytics Filters")
+        if df is None or df.empty:
+            st.caption("No filed invoices yet.")
         else:
-            sel_month = 'All'
-
-        view_df = df.copy()
-        if sel_vendor != 'All':
-            view_df = view_df[view_df['vendor'] == sel_vendor]
-        if sel_month != 'All':
-            view_df = view_df[view_df[date_col] == sel_month]
+            vendors = ['All'] + sorted(df['vendor'].dropna().unique().tolist())
+            sel_vendor = st.selectbox("Vendor", vendors, key="dash_vendor")
+            view_df = df.copy()
+            if sel_vendor != 'All':
+                view_df = view_df[view_df['vendor'] == sel_vendor]
 
     with col_charts:
-        st.subheader("Spend by Vendor")
-        vendor_spend = view_df.groupby('vendor')['total_num'].sum().sort_values(ascending=False)
-        st.bar_chart(vendor_spend)
+        if df is None or df.empty:
+            st.caption("Spend by Vendor")
+        else:
+            st.subheader("Spend by Vendor")
+            vendor_spend = view_df.groupby('vendor')['total_num'].sum().sort_values(ascending=False)
+            st.bar_chart(vendor_spend)
 
-        st.subheader("Invoices by Vendor")
-        vendor_count_chart = view_df['vendor'].value_counts()
-        st.bar_chart(vendor_count_chart)
+            st.subheader("Invoices by Vendor")
+            vendor_count_chart = view_df['vendor'].value_counts()
+            st.bar_chart(vendor_count_chart)
 
-    st.divider()
-    st.subheader(f"All Invoice Details ({len(view_df)})")
-    display_cols = [c for c in [
-        'timestamp', 'sender', 'vendor', 'invoice_number', 'po_number',
-        'invoice_date', 'terms', 'subtotal', 'tax', 'total', 'currency',
-        'extra_fields', 'filename',
-    ] if c in view_df.columns]
-    st.dataframe(view_df[display_cols], width='stretch')
-
-    st.download_button(
-        label="Download filtered results (.csv)",
-        data=csv_bytes(view_df[display_cols]),
-        file_name="dashboard_results.csv",
-        mime="text/csv",
-        key="dl_dashboard",
-    )
+    if df is not None and len(df) > 0:
+        st.divider()
+        st.subheader(f"Filed Invoice Details ({len(df)})")
+        display_cols = [c for c in [
+            'timestamp', 'sender', 'vendor', 'invoice_number', 'po_number',
+            'invoice_date', 'terms', 'subtotal', 'tax', 'total', 'currency',
+            'extra_fields', 'filename',
+        ] if c in df.columns]
+        st.dataframe(df[display_cols], width='stretch')
+        st.download_button(
+            label="Download results (.csv)",
+            data=csv_bytes(df[display_cols]),
+            file_name="dashboard_results.csv",
+            mime="text/csv",
+            key="dl_dashboard",
+        )
 
 
 def tab_process_invoices(fetcher):
@@ -670,10 +718,16 @@ def main():
     if 'invoices_db' not in st.session_state:
         init_db(DB_PATH)
         st.session_state.invoices_db = load_db(DB_PATH)
+    if 'auto_checked' not in st.session_state:
+        st.session_state.auto_checked = False
 
     create_folder_structure()
 
     fetcher = sidebar_config()
+
+    if fetcher and not st.session_state.auto_checked:
+        st.session_state.auto_checked = True
+        fetch_and_process(fetcher)
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "Dashboard",
@@ -686,7 +740,7 @@ def main():
     ])
 
     with tab1:
-        tab_dashboard()
+        tab_dashboard(fetcher)
     with tab2:
         tab_process_invoices(fetcher)
     with tab3:
