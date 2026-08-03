@@ -14,7 +14,7 @@ from classifier import classify_pdf
 from extractor import (
     resolve_vendor_name, extract_invoice_number, extract_po_number,
     extract_invoice_date, extract_terms, extract_subtotal,
-    extract_tax, extract_total, extract_currency,
+    extract_tax, extract_total, extract_currency, extract_extra_fields,
 )
 from file_handler import (
     create_folder_structure, file_invoice, log_activity, repair_activity_log_schema,
@@ -46,6 +46,7 @@ class InvoiceItem:
     tax: str
     total: str
     currency: str
+    extra_fields: dict = field(default_factory=dict)
     proposed_filename: str
     filed: bool = False
     sent_to_review: bool = False
@@ -95,6 +96,7 @@ def fetch_and_process(fetcher):
                         tax = extract_tax(extracted_text)
                         total = extract_total(extracted_text)
                         currency = extract_currency(extracted_text)
+                        extra = extract_extra_fields(extracted_text)
                     else:
                         vendor = ''
                         inv_num = ''
@@ -105,6 +107,7 @@ def fetch_and_process(fetcher):
                         tax = ''
                         total = ''
                         currency = ''
+                        extra = {}
 
                     item = InvoiceItem(
                         email_uid=email_att.email_uid,
@@ -124,6 +127,7 @@ def fetch_and_process(fetcher):
                         tax=tax or '',
                         total=total or '',
                         currency=currency or '',
+                        extra_fields=extra,
                         proposed_filename='',
                         editable_vendor=vendor or '',
                         editable_inv=inv_num or '',
@@ -211,6 +215,7 @@ def confirm_file_item(item_idx, item, fetcher):
         'tax': item.tax,
         'total': item.total,
         'currency': item.currency,
+        'extra_fields': item.extra_fields,
         'filename': safe_name,
         'original_filename': item.original_filename,
     }
@@ -343,6 +348,8 @@ def tab_process_invoices(fetcher):
                             st.markdown(f"**Tax:** {item.currency}{item.tax}")
                         if item.total:
                             st.markdown(f"**Total:** {item.currency}{item.total}")
+                        for k, v in item.extra_fields.items():
+                            st.markdown(f"**{k.replace('_', ' ').title()}:** {v}")
                     else:
                         st.markdown("**:red[Scanned]** — auto-flagged for manual review")
 

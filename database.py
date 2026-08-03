@@ -1,4 +1,5 @@
 import os
+import json
 
 import pandas as pd
 
@@ -6,7 +7,7 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'invoice_inta
 DB_COLUMNS = [
     'timestamp', 'sender', 'vendor', 'invoice_number', 'po_number',
     'invoice_date', 'terms', 'subtotal', 'tax', 'total', 'currency',
-    'filename', 'original_filename',
+    'extra_fields', 'filename', 'original_filename',
 ]
 
 
@@ -47,7 +48,10 @@ def is_duplicate(invoice_number, vendor, df):
 def add_invoice(record, df):
     if df is None:
         df = empty_db()
-    new_row = pd.DataFrame([record], columns=DB_COLUMNS)
+    rec = dict(record)
+    if isinstance(rec.get('extra_fields'), dict):
+        rec['extra_fields'] = json.dumps(rec['extra_fields'], default=str)
+    new_row = pd.DataFrame([rec], columns=DB_COLUMNS)
     return pd.concat([df, new_row], ignore_index=True)
 
 
